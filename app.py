@@ -26,13 +26,14 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.title("⛽ OmniGas: Multi-Chain Routing Engine")
-st.write("Real-time gas monitoring, threshold alerting, and bridge execution matrix.")
+st.write("Real-time gas monitoring, asset-specific friction metrics, and bridge execution matrix.")
 st.markdown("---")
 
 # 1. Sidebar - Configuration Panel & Threshold Alerts
 with st.sidebar:
     st.header("⚙️ Engine Control")
-    amount = st.number_input("💵 Capital to Transfer ($)", min_value=1.0, value=100.0, step=50.0)
+    stablecoin = st.selectbox("🎯 Target Stablecoin", ["USDT", "USDC"], index=0)
+    amount = st.number_input(f"💵 Capital to Transfer ({stablecoin})", min_value=1.0, value=100.0, step=50.0)
     
     st.markdown("---")
     st.header("🚨 Gas Watcher Alerts")
@@ -126,8 +127,10 @@ for name, config in networks.items():
         metric, usd_fee = fetch_solana_fee(native_price)
         metric_str = f"{metric:,} m-lamports" if metric is not None else "🛑 Node Timeout"
     elif config["type"] == "Tron":
-        usd_fee = 27.0 * native_price
-        metric_str = "Standard Burn (~27 TRX)"
+        # Tron friction variance simulation (USDT requires standard burn, USDC varies by interaction)
+        burn_amount = 32.0 if stablecoin == "USDT" else 15.0
+        usd_fee = burn_amount * native_price
+        metric_str = f"Burn (~{burn_amount:.0f} TRX)"
     elif config["type"] == "Plasma":
         usd_fee = 0.0
         metric_str = "Zero-Fee Route"
@@ -137,20 +140,21 @@ for name, config in networks.items():
         pct_kept = (amt_rec / amount) * 100
         raw_data.append({
             "Network Rail": name,
+            "Asset": stablecoin,
             "Live Congestion Metric": metric_str,
             "Network Fee (USD)": usd_fee,
-            "Recipient Receives ($)": amt_rec,
+            f"Recipient Receives ({stablecoin})": amt_rec,
             "Capital Efficiency (%)": pct_kept,
             "Action Link": config["bridge"]
         })
-else:
-    df = pd.DataFrame(raw_data).sort_values(by="Network Fee (USD)", ascending=True)
+
+df = pd.DataFrame(raw_data).sort_values(by="Network Fee (USD)", ascending=True)
 
 # Apply Live Budget Watcher Filter
 if enable_alerts:
     under_budget_count = len(df[df["Network Fee (USD)"] <= max_budget])
     if under_budget_count > 0:
-        st.toast(f"🎉 {under_budget_count} networks are currently within your budget!", icon="✅")
+        st.toast(f"🎉 {under_budget_count} networks match your {stablecoin} budget criteria!", icon="✅")
     df = df[df["Network Fee (USD)"] <= max_budget]
 
 # 3. Dynamic Key Performance Indicators
@@ -160,7 +164,7 @@ if not valid_df.empty:
     best_route = valid_df.iloc[0]
     worst_route = valid_df.iloc[-1]
     
-    st.write("### 🚨 Top Routing Analytics")
+    st.write(f"### 🚨 Top Routing Analytics ({stablecoin})")
     m_col1, m_col2, m_col3 = st.columns(3)
     with m_col1:
         st.metric(label="🏆 Optimal Settlement Rail", value=best_route["Network Rail"])
@@ -169,20 +173,21 @@ if not valid_df.empty:
     with m_col3:
         st.metric(label="⚠️ Maximum Network Gas Cost", value=f"{worst_route['Network Rail']} (${worst_route['Network Fee (USD)']:.2f})")
 else:
-    st.warning("No networks matched your budget criteria. Loosen your budget slider in the sidebar.")
+    st.warning(f"No networks matched your budget criteria. Loosen your budget slider in the sidebar.")
 
 # 4. Interactive Data Presentation Dataframe
-st.write("### 🏁 OmniGas Live Matrix")
+st.write(f"### 🏁 OmniGas Live Matrix ({stablecoin})")
 st.dataframe(
     df,
     use_container_width=True,
     hide_index=True,
     column_config={
         "Network Rail": st.column_config.TextColumn("Network Rail", width="medium"),
+        "Asset": st.column_config.TextColumn("Asset", width="small"),
         "Live Congestion Metric": st.column_config.TextColumn("Live Load Metric", width="medium"),
         "Network Fee (USD)": st.column_config.NumberColumn("Est. Fee (USD)", format="$%.4f"),
-        "Recipient Receives ($)": st.column_config.NumberColumn("Final Delivered Value", format="$%.4f"),
+        f"Recipient Receives ({stablecoin})": st.column_config.NumberColumn(f"Final Delivered {stablecoin}", format="$%.4f"),
         "Capital Efficiency (%)": st.column_config.ProgressColumn("Capital Efficiency", format="%.2f%%", min_value=0.0, max_value=100.0),
-        "Action Link": st.column_config.LinkColumn("Execute Transfer", display_text="Open Bridge ↗️")
+        "Action Link": st.column_config.LinkColumn("Execute Transfer", display_text=f"Bridge {stablecoin} ↗️")
     }
 )
